@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NYISO Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: one narrow column, like a control-room log. Summary strip, then alert feed, then reference tables. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #142030;
+  --muted: #5b6778;
+  --line: #d9dfe7;
+  --accent: #1b5fd9;
+  --major: #c0352b;
+  --record: #6a4cd3;
+  --notable: #b2730f;
+  --c-gas: #c47f2c; --c-nuc: #7356c9; --c-hydro: #2b78bd; --c-wind: #2f9d96; --c-oren: #7fa82e; --c-ofos: #7d838c;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151d; --surface: #17202b; --ink: #e6ebf2; --muted: #93a0b2; --line: #283444;
+    --accent: #6d9eff; --major: #ff6b5e; --record: #a58cff; --notable: #f0b14a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151d; --surface: #17202b; --ink: #e6ebf2; --muted: #93a0b2; --line: #283444;
+  --accent: #6d9eff; --major: #ff6b5e; --record: #a58cff; --notable: #f0b14a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body); }
+.wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.wrap > * { min-width: 0; }
+h1, h2 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 30px; letter-spacing: .01em; }
+h2 { font-size: 19px; display: flex; align-items: baseline; gap: 10px; }
+h2 .count { font: 500 13px var(--f-mono); color: var(--muted); }
+.sub { color: var(--muted); margin: 4px 0 0; max-width: 62ch; }
+.status { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 14px; font-size: 13px; color: var(--muted); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); font-weight: 500; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: #2f9e5b; } .dot.stale { background: var(--notable); }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.feed { display: grid; gap: 10px; margin-top: 12px; }
+.day { font: 500 12px var(--f-mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 8px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--notable); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; }
+.card.major { border-left-color: var(--major); }
+.card.record { border-left-color: var(--record); }
+.card .top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; justify-content: space-between; }
+.card .title { font-weight: 600; font-size: 16px; }
+.card .when { font: 12px var(--f-mono); color: var(--muted); white-space: nowrap; }
+.card .detail { color: var(--ink); opacity: .88; font-size: 14px; max-width: 68ch; }
+.chip { font: 500 11px var(--f-mono); text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 4px; border: 1px solid currentColor; }
+.chip.major { color: var(--major); } .chip.record { color: var(--record); } .chip.notable { color: var(--notable); }
+.chips { display: flex; gap: 6px; align-items: center; }
+.empty { background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 16px; color: var(--muted); }
+.tablewrap { overflow-x: auto; margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font: 500 12px var(--f-mono); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+td.num { text-align: right; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th.num { text-align: right; }
+.watch { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.watch li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 2px; }
+.watch b { font-weight: 600; }
+.watch span { color: var(--muted); font-size: 13px; }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.notes { font-size: 13px; color: var(--muted); }
+.notes ul { margin: 6px 0 0; padding-left: 18px; }
+table.cmp { table-layout: fixed; }
+table.cmp th:first-child { width: 38%; }
+table.cmp td:first-child { color: var(--muted); }
+table.cmp td.num { white-space: normal; overflow-wrap: anywhere; }
+table.cmp tr.grp td { font: 500 12px var(--f-mono); color: var(--ink); text-transform: uppercase; letter-spacing: .05em; background: var(--bg); padding-top: 7px; padding-bottom: 7px; }
+td .sub2 { display: block; font-size: 12px; color: var(--muted); font-family: var(--f-body); }
+.mixbar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: var(--line); }
+.mixbar span { display: block; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.asof { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.btn { font: 500 13px var(--f-body); color: var(--accent); background: var(--surface); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.btn:hover { background: var(--accent); color: var(--surface); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn[hidden] { display: none; }
+.alerthead { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.dlmsg { font-size: 12px; color: var(--muted); }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+a { color: var(--accent); }
+@media (max-width: 420px) { h1 { font-size: 26px; } .card .when { white-space: normal; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>NYISO Watch</h1>
+    <p class="sub">A daily snapshot of New York's grid, plus alerts for rare and notable events: price spikes, records, emergencies and new congestion. Checked three times a day (about 8:45am, 1:45pm and 6:45pm) against NYISO's public archive back to 1999. Each check covers everything since the last one.</p>
+    <div class="status" id="status">
+      <span class="pill"><span class="dot" id="dot"></span><span id="lastrun">Connecting…</span></span>
+      <span id="window"></span>
+    </div>
+  </header>
+
+  <section id="alerts">
+    <div class="alerthead"><h2>Alerts <span class="count" id="alertcount"></span></h2><span><button class="btn" id="dlcsv" type="button" hidden>Download all alerts (CSV)</button> <span class="dlmsg" id="dlmsg"></span></span></div>
+    <div class="feed" id="feed"><div class="empty">Loading alerts…</div></div>
+    <div class="notes" id="lastnotes"></div>
+  </section>
+
+  <section id="today">
+    <h2>Today and yesterday</h2>
+    <div class="asof" id="statsasof">Loading…</div>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead><tr><th></th><th class="num" id="h0">Today</th><th class="num" id="h1">Yesterday</th></tr></thead>
+        <tbody id="stattable"><tr><td colspan="3" class="notes">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="legend" id="mixlegend"></div>
+  </section>
+
+  <section id="records">
+    <h2>Records being tracked</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Record</th><th class="num">Value</th><th>Set</th></tr></thead>
+        <tbody id="rectable"><tr><td colspan="3" class="notes">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="triggers">
+    <h2>What triggers an alert</h2>
+    <p class="sub">Thresholds set from 2023–2026 data so alerts come about once a week on average, in clusters during heat waves and cold snaps. Each alert gives the last time something comparable happened.</p>
+    <ul class="watch">
+      <li><b>Price spike</b><span>Any zone's hourly average real-time LBMP above $500/MWh (5-minute blips that fade within the hour don't count). About 37 days in the past two years. Reports how many hours it lasted. Once per 18 hours unless the peak doubles.</span></li>
+      <li><b>Widespread negative prices</b><span>Three or more zones with a negative hourly average real-time LBMP in the same hour. About 6 days a year, mostly spring. Negative hours in Zone D alone are routine and don't count.</span></li>
+      <li><b>Tomorrow's day-ahead prices</b><span>A zone's next-day average above its 99th percentile for the past three years, checked when the DA market posts.</span></li>
+      <li><b>Reserve shortage</b><span>10-minute spinning reserve price averaging over $500/MWh for an hour. About 14 days in two years.</span></li>
+      <li><b>High demand</b><span>NYCA load above 30,000 MW in summer or 24,000 MW in winter, with the last time it was this high.</span></li>
+      <li><b>Demand forecast</b><span>NYISO's forecast for the next five days shows a peak above 29,000 MW (May–Sep) or 23,000 MW (Nov–Mar). A few days' warning before heat waves and cold snaps; repeats only if the forecast rises 3% or after three days.</span></li>
+      <li><b>Records</b><span>All-time and seasonal load, NYC load, lowest midday load, wind (hourly and daily), grid solar and other renewables, behind-the-meter solar, wind plus solar, and zero-carbon share since Indian Point closed.</span></li>
+      <li><b>Nuclear trip</b><span>Statewide nuclear output falling more than 400 MW within 20 minutes.</span></li>
+      <li><b>Emergencies</b><span>A Major Emergency declaration, or emergency capacity requests to neighboring systems.</span></li>
+      <li><b>New binding constraint</b><span>A transmission facility binding at a shadow price of $500 or more that hadn't bound at all in the prior two years.</span></li>
+      <li><b>Judgment call</b><span>Each run also checks spreads, congestion and generation mix against their normal range for the month. Claude flags these only when they look new and meaningful.</span></li>
+    </ul>
+  </section>
+
+  <section id="examples">
+    <h2>What alerts look like <span class="count">replayed from past events</span></h2>
+    <p class="sub">The detector run on past days, to show what it would have sent. These are not live alerts.</p>
+    <div class="feed" id="exfeed"><div class="empty">Loading…</div></div>
+  </section>
+
+  <footer>Data: NYISO Market &amp; Operational Data (<a href="https://mis.nyiso.com/public/">mis.nyiso.com/public</a>) — real-time and day-ahead zonal LBMP, actual load, fuel mix, behind-the-meter solar estimates, ancillary service prices, limiting constraints, interface flows and real-time events. Times are New York local.</footer>
+</div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const REC = {
+    nyca_load_h: ["All-time NYCA load (hourly)", "mw"], nyca_winter_load_h: ["Winter NYCA load (hourly)", "mw"],
+    nyc_load_h: ["NYC (Zone J) load", "mw"], midday_low_load_h: ["Lowest midday NYCA load (10am–4pm, since 2015)", "mw"],
+    wind_h: ["Wind output (hourly)", "mw"], wind_d: ["Wind energy (one day)", "mwh"],
+    oren_h: ["Other Renewables, incl. grid solar (hourly)", "mw"], btm_h: ["Behind-the-meter solar (NYISO estimate)", "mw"],
+    ws_h: ["Wind + solar incl. behind-the-meter (hourly)", "mw"], zc_share_h: ["Zero-carbon share, hourly (since May 2021)", "pct"],
+    zc_share_d: ["Zero-carbon share, daily (since May 2021)", "pct"]
+  };
+  const fmtV = (v, k) => k === "pct" ? (v * 100).toFixed(1) + "%" : Math.round(v).toLocaleString("en-US") + (k === "mwh" ? " MWh" : " MW");
+  const fmtD = (s, withTime) => { const d = new Date(s); if (isNaN(d)) return String(s);
+    return d.toLocaleString("en-US", withTime ? { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", year: "numeric" }); };
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const sevLabel = { major: "Major", record: "Record", notable: "Notable" };
+
+  function renderFeed(box, docs, emptyText) {
+    box.replaceChildren();
+    if (!docs.length) { box.appendChild(el("div", "empty", emptyText)); return; }
+    let lastDay = "";
+    for (const d of docs) {
+      const a = d.data() || {};
+      const sev = ["major", "record", "notable"].includes(a.severity) ? a.severity : "notable";
+      const day = new Date(a.ts).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+      if (day !== lastDay) { box.appendChild(el("div", "day", day)); lastDay = day; }
+      const c = el("article", "card " + sev);
+      const top = el("div", "top");
+      top.appendChild(el("span", "title", a.title || ""));
+      const chips = el("span", "chips");
+      chips.appendChild(el("span", "chip " + sev, sevLabel[sev]));
+      chips.appendChild(el("span", "when", new Date(a.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })));
+      top.appendChild(chips);
+      c.appendChild(top);
+      c.appendChild(el("div", "detail", a.detail || ""));
+      box.appendChild(c);
+    }
+  }
+
+  function renderRecords(rec) {
+    const tb = $("rectable"); tb.replaceChildren();
+    const keys = Object.keys(REC).filter((k) => rec && rec[k]);
+    if (!keys.length) { const tr = el("tr"); const td = el("td", "notes", "No records loaded yet."); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); return; }
+    for (const k of keys) {
+      const [label, kind] = REC[k]; const [v, t] = rec[k];
+      const tr = el("tr");
+      tr.appendChild(el("td", "", label));
+      tr.appendChild(el("td", "num", fmtV(v, kind)));
+      tr.appendChild(el("td", "mono", fmtD(t, false)));
+      tb.appendChild(tr);
+    }
+  }
+
+  function renderRun(r) {
+    if (!r) { $("lastrun").textContent = "No checks yet"; return; }
+    const at = new Date(r.at); const ageH = (Date.now() - at) / 36e5;
+    $("dot").className = "dot " + (ageH < 15 ? "ok" : "stale");
+    $("lastrun").textContent = "Last checked " + fmtD(r.at, true);
+    $("window").textContent = r.window ? "Covered " + r.window : "";
+    const n = $("lastnotes"); n.replaceChildren();
+    if (Array.isArray(r.watch) && r.watch.length) {
+      n.appendChild(el("div", "", "Outside normal range in the last check (not alerts on their own):"));
+      const ul = el("ul"); r.watch.slice(0, 6).forEach((w) => ul.appendChild(el("li", "", String(w)))); n.appendChild(ul);
+    }
+  }
+
+
+  const MIXC = {"Gas & dual fuel": "--c-gas", "Nuclear": "--c-nuc", "Hydro": "--c-hydro", "Wind": "--c-wind", "Other renewables": "--c-oren", "Other fossil": "--c-ofos"};
+  const n0 = (v) => v == null ? "—" : Math.round(v).toLocaleString("en-US");
+  const usd = (v) => v == null ? "—" : "$" + Number(v).toFixed(2);
+  const pc = (v) => v == null ? "—" : (v * 100).toFixed(1) + "%";
+  const sgn = (v) => v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString("en-US");
+  function cell(main, sub) { const td = el("td", "num", main); if (sub) td.appendChild(el("span", "sub2", sub)); return td; }
+  function renderStats(st) {
+    const tb = $("stattable"); tb.replaceChildren();
+    const days = (st && Array.isArray(st.days)) ? st.days : [];
+    if (!days.length) { const tr = el("tr"); const td = el("td", "notes", "No daily summary yet. It fills in at the next check."); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); return; }
+    const [a, b] = [days[0] || {}, days[1] || {}];
+    $("h0").textContent = a.hours ? "Today, " + a.hours + " h" : "Today";
+    $("h1").textContent = "Yesterday";
+    $("statsasof").textContent = "As of the check at " + fmtD(st.asof, true) + ". Hourly averages; imports are net, + into New York, − out.";
+    const grp = (t) => { const tr = el("tr", "grp"); const td = el("td", "", t); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); };
+    const row = (label, f) => { const tr = el("tr"); tr.appendChild(el("td", "", label)); tr.appendChild(f(a)); tr.appendChild(f(b)); tb.appendChild(tr); };
+    const g = (o, ...k) => k.reduce((x, y) => (x == null ? undefined : x[y]), o);
+    grp("Demand");
+    row("Energy used (GWh)", (d) => cell(g(d, "load", "energy_gwh") == null ? "—" : g(d, "load", "energy_gwh").toFixed(1)));
+    row("Peak load (MW)", (d) => cell(n0(g(d, "load", "peak_mw")), g(d, "load", "peak_at") ? "hour starting " + d.load.peak_at : ""));
+    row("Lowest load (MW)", (d) => cell(n0(g(d, "load", "min_mw")), g(d, "load", "min_at") ? "hour starting " + d.load.min_at : ""));
+    row("Behind-the-meter solar peak", (d) => cell(d.btm_peak ? n0(d.btm_peak.mw) + " MW" : "—", d.btm_peak ? d.btm_peak.at + " · " + d.btm_peak.gwh + " GWh" : (d === a ? "posted next day" : "")));
+    grp("In-state generation");
+    row("Generation (GWh)", (d) => cell(g(d, "gen", "energy_gwh") == null ? "—" : d.gen.energy_gwh.toFixed(1)));
+    row("Fuel mix", (d) => { const td = el("td", "num"); const mix = g(d, "gen", "mix"); if (!mix) { td.textContent = "—"; return td; }
+      const bar = el("div", "mixbar"); bar.setAttribute("role", "img");
+      bar.setAttribute("aria-label", Object.entries(mix).map(([k, v]) => k + " " + pc(v)).join(", "));
+      for (const [k, v] of Object.entries(mix)) { if (!v) continue; const sp = el("span"); sp.style.width = (v * 100) + "%"; sp.style.background = "var(" + (MIXC[k] || "--muted") + ")"; sp.title = k + " " + pc(v); bar.appendChild(sp); }
+      td.appendChild(bar); return td; });
+    for (const k of Object.keys(MIXC)) row(k, (d) => cell(pc(g(d, "gen", "mix", k))));
+    row("Zero-carbon share", (d) => cell(pc(g(d, "gen", "zero_carbon"))));
+    grp("Net imports (average MW)");
+    for (const k of ["Hydro-Québec", "Ontario", "PJM", "New England"]) row(k, (d) => { const x = g(d, "imports", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "range " + sgn(x.min_mw) + " to " + sgn(x.max_mw) : ""); });
+    row("Total net imports", (d) => cell(sgn(d.net_import_avg_mw)));
+    for (const k of ["CHPE", "Neptune", "Cross-Sound"]) row("  " + k + " line", (d) => { const x = g(d, "lines", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "max " + sgn(x.max_mw) : ""); });
+    grp("Prices ($/MWh)");
+    row("Real-time avg, Zone J", (d) => cell(usd(g(d, "rt", "avg_J"))));
+    row("Real-time avg, Zone K", (d) => cell(usd(g(d, "rt", "avg_K"))));
+    row("Real-time avg, Zone A", (d) => cell(usd(g(d, "rt", "avg_A"))));
+    row("Day-ahead avg, Zone J", (d) => cell(usd(g(d, "da", "avg_J"))));
+    row("Day-ahead avg, Zone A", (d) => cell(usd(g(d, "da", "avg_A"))));
+    row("Highest hourly real-time", (d) => cell(d.rt ? "$" + n0(d.rt.max) : "—", d.rt ? "Zone " + d.rt.max_zone + ", " + d.rt.max_at : ""));
+    row("Lowest hourly real-time", (d) => cell(d.rt ? "$" + n0(d.rt.min) : "—", d.rt ? "Zone " + d.rt.min_zone : ""));
+    grp("Transmission");
+    for (const [k, lab] of [["CENTRAL EAST - VC", "Central East peak"], ["TOTAL EAST", "Total East peak"], ["UPNY CONED", "UPNY–ConEd peak"]])
+      row(lab, (d) => { const x = g(d, "transfers", k); return cell(x ? n0(x.max_mw) + " MW" : "—", x && x.max_pct_limit != null ? Math.round(x.max_pct_limit * 100) + "% of limit" : ""); });
+    row("Most-binding constraint", (d) => { const c = (d.constraints || [])[0]; return cell(c ? c.name.replace(/\s+\d+$/, "").replace(/\s+/g, " ") : "—", c ? c.intervals + " five-min intervals · peak $" + n0(c.peak) : ""); });
+    const lg = $("mixlegend"); lg.replaceChildren();
+    for (const [k, v] of Object.entries(MIXC)) { const s = el("span"); const i = el("i"); i.style.background = "var(" + v + ")"; s.appendChild(i); s.appendChild(document.createTextNode(k)); lg.appendChild(s); }
+  }
+
+
+  async function setupDownload(db) {
+    const dl = await claude.use("downloads");
+    const btn = $("dlcsv"), msg = $("dlmsg");
+    if (!dl) return;
+    btn.hidden = false;
+    const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    btn.addEventListener("click", async () => {
+      msg.textContent = "Preparing…";
+      try {
+        const snap = await db.collection("alerts").orderBy("ts", "asc").limit(1000).get();
+        const rows = [["date", "time", "severity", "type", "title", "detail"].join(",")];
+        for (const d of snap.docs) {
+          const a = d.data() || {}; const [date, time] = String(a.ts || "").split("T");
+          rows.push([date, time, a.severity, a.type, a.title, a.detail].map(q).join(","));
+        }
+        const today = new Date().toISOString().slice(0, 10);
+        await dl.save({ filename: "nyiso-watch-alerts-" + today + ".csv", data: rows.join("\r\n") + "\r\n" });
+        msg.textContent = snap.size ? snap.size + " alert" + (snap.size === 1 ? "" : "s") + " saved" : "Saved (no alerts yet, headers only)";
+      } catch (e) {
+        msg.textContent = e && e.code === "declined" ? "" : e && e.code === "rate_limited" ? "Try again in a moment" : "Couldn't save the file";
+        if (e && ["unavailable", "not_granted", "capability_disabled", "capability_removed"].includes(e.code)) btn.hidden = true;
+      }
+    });
+  }
+
+  claude.use("db").then((db) => {
+    if (!db) { $("lastrun").textContent = "Sign in to see alerts"; $("feed").replaceChildren(el("div", "empty", "Alerts need a signed-in view of this page.")); return; }
+    const timer = setTimeout(() => { $("lastrun").textContent = "Can't reach the alert store yet"; }, 10000);
+    db.collection("alerts").orderBy("ts", "desc").limit(200).onSnapshot((s) => {
+      if (!s.metadata.fromCache) clearTimeout(timer);
+      $("alertcount").textContent = s.size ? s.size + " so far" : "";
+      renderFeed($("feed"), s.docs, "No alerts yet. Quiet is normal: most weeks have zero or one.");
+    }, (e) => { clearTimeout(timer); $("feed").replaceChildren(el("div", "empty", "Couldn't load alerts (" + e.code + ").")); });
+    db.collection("examples").orderBy("ts", "desc").limit(50).onSnapshot((s) => renderFeed($("exfeed"), s.docs, "No examples stored."), () => {});
+    db.doc("state/main").onSnapshot((s) => renderRecords(s.exists ? (s.data() || {}).records : null), () => {});
+    db.doc("stats/daily").onSnapshot((s) => renderStats(s.exists ? s.data() : null), () => {});
+    setupDownload(db);
+    db.doc("runs/last").onSnapshot((s) => renderRun(s.exists ? s.data() : null), () => {});
+  });
+})();
+</script>
+</body>
+</html>
