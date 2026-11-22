@@ -81,9 +81,12 @@ summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outli
 .notes ul { margin: 6px 0 0; padding-left: 18px; }
 table.cmp { table-layout: fixed; }
 table.cmp th:first-child { width: 38%; }
+table.cmp.one td:first-child { width: 50%; }
 table.cmp td:first-child { color: var(--muted); }
 table.cmp td.num { white-space: normal; overflow-wrap: anywhere; }
 table.cmp tr.grp td { font: 500 12px var(--f-mono); color: var(--ink); text-transform: uppercase; letter-spacing: .05em; background: var(--bg); padding-top: 7px; padding-bottom: 7px; }
+th .sub2 { display: block; text-transform: none; letter-spacing: 0; font: 400 11px var(--f-body); color: var(--muted); }
+table.cmp th { white-space: normal; }
 td .sub2 { display: block; font-size: 12px; color: var(--muted); font-family: var(--f-body); }
 .mixbar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: var(--line); }
 .mixbar span { display: block; height: 100%; }
@@ -105,7 +108,7 @@ a { color: var(--accent); }
 <div class="wrap">
   <header>
     <h1>NYISO Watch</h1>
-    <p class="sub">A daily snapshot of New York's grid, plus alerts for rare and notable events: price spikes, records, emergencies and new congestion. Checked three times a day (about 8:45am, 1:45pm and 6:45pm) against NYISO's public archive back to 1999. Each check covers everything since the last one.</p>
+    <p class="sub">A daily snapshot of New York's grid, plus alerts for rare and notable events: price spikes, records, emergencies and new congestion. Checked once a day at about 8:10am against NYISO's public archive back to 1999. Each check covers everything since the previous morning.</p>
     <div class="status" id="status">
       <span class="pill"><span class="dot" id="dot"></span><span id="lastrun">Connecting…</span></span>
       <span id="window"></span>
@@ -123,8 +126,14 @@ a { color: var(--accent); }
     <div class="asof" id="statsasof">Loading…</div>
     <div class="tablewrap">
       <table class="cmp">
-        <thead><tr><th></th><th class="num" id="h0">Today</th><th class="num" id="h1">Yesterday</th></tr></thead>
+        <thead><tr><th></th><th class="num">Today<span class="sub2">forecast &amp; day-ahead</span></th><th class="num">Yesterday<span class="sub2">actual</span></th></tr></thead>
         <tbody id="stattable"><tr><td colspan="3" class="notes">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <h2 style="margin-top:18px">Yesterday's grid</h2>
+    <div class="tablewrap">
+      <table class="cmp one">
+        <tbody id="ytable"><tr><td colspan="2" class="notes">Loading…</td></tr></tbody>
       </table>
     </div>
     <div class="legend" id="mixlegend"></div>
@@ -146,7 +155,7 @@ a { color: var(--accent); }
     <ul class="watch">
       <li><b>Price spike</b><span>Any zone's hourly average real-time LBMP above $500/MWh (5-minute blips that fade within the hour don't count). About 37 days in the past two years. Reports how many hours it lasted. Once per 18 hours unless the peak doubles.</span></li>
       <li><b>Widespread negative prices</b><span>Three or more zones with a negative hourly average real-time LBMP in the same hour. About 6 days a year, mostly spring. Negative hours in Zone D alone are routine and don't count.</span></li>
-      <li><b>Tomorrow's day-ahead prices</b><span>A zone's next-day average above its 99th percentile for the past three years, checked when the DA market posts.</span></li>
+      <li><b>Day-ahead prices</b><span>A zone's day-ahead daily average above its 99th percentile for the past three years. Checked each morning for today (and tomorrow, if already posted).</span></li>
       <li><b>Reserve shortage</b><span>10-minute spinning reserve price averaging over $500/MWh for an hour. About 14 days in two years.</span></li>
       <li><b>High demand</b><span>NYCA load above 30,000 MW in summer or 24,000 MW in winter, with the last time it was this high.</span></li>
       <li><b>Demand forecast</b><span>NYISO's forecast for the next five days shows a peak above 29,000 MW (May–Sep) or 23,000 MW (Nov–Mar). A few days' warning before heat waves and cold snaps; repeats only if the forecast rises 3% or after three days.</span></li>
@@ -222,7 +231,7 @@ a { color: var(--accent); }
   function renderRun(r) {
     if (!r) { $("lastrun").textContent = "No checks yet"; return; }
     const at = new Date(r.at); const ageH = (Date.now() - at) / 36e5;
-    $("dot").className = "dot " + (ageH < 15 ? "ok" : "stale");
+    $("dot").className = "dot " + (ageH < 26 ? "ok" : "stale");
     $("lastrun").textContent = "Last checked " + fmtD(r.at, true);
     $("window").textContent = r.window ? "Covered " + r.window : "";
     const n = $("lastnotes"); n.replaceChildren();
@@ -240,49 +249,50 @@ a { color: var(--accent); }
   const sgn = (v) => v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString("en-US");
   function cell(main, sub) { const td = el("td", "num", main); if (sub) td.appendChild(el("span", "sub2", sub)); return td; }
   function renderStats(st) {
-    const tb = $("stattable"); tb.replaceChildren();
-    const days = (st && Array.isArray(st.days)) ? st.days : [];
-    if (!days.length) { const tr = el("tr"); const td = el("td", "notes", "No daily summary yet. It fills in at the next check."); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); return; }
-    const [a, b] = [days[0] || {}, days[1] || {}];
-    $("h0").textContent = a.hours ? "Today, " + a.hours + " h" : "Today";
-    $("h1").textContent = "Yesterday";
-    $("statsasof").textContent = "As of the check at " + fmtD(st.asof, true) + ". Hourly averages; imports are net, + into New York, − out.";
-    const grp = (t) => { const tr = el("tr", "grp"); const td = el("td", "", t); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); };
-    const row = (label, f) => { const tr = el("tr"); tr.appendChild(el("td", "", label)); tr.appendChild(f(a)); tr.appendChild(f(b)); tb.appendChild(tr); };
-    const g = (o, ...k) => k.reduce((x, y) => (x == null ? undefined : x[y]), o);
-    grp("Demand");
-    row("Energy used (GWh)", (d) => cell(g(d, "load", "energy_gwh") == null ? "—" : g(d, "load", "energy_gwh").toFixed(1)));
-    row("Peak load (MW)", (d) => cell(n0(g(d, "load", "peak_mw")), g(d, "load", "peak_at") ? "hour starting " + d.load.peak_at : ""));
-    row("Lowest load (MW)", (d) => cell(n0(g(d, "load", "min_mw")), g(d, "load", "min_at") ? "hour starting " + d.load.min_at : ""));
-    row("Behind-the-meter solar peak", (d) => cell(d.btm_peak ? n0(d.btm_peak.mw) + " MW" : "—", d.btm_peak ? d.btm_peak.at + " · " + d.btm_peak.gwh + " GWh" : (d === a ? "posted next day" : "")));
-    grp("In-state generation");
-    row("Generation (GWh)", (d) => cell(g(d, "gen", "energy_gwh") == null ? "—" : d.gen.energy_gwh.toFixed(1)));
-    row("Fuel mix", (d) => { const td = el("td", "num"); const mix = g(d, "gen", "mix"); if (!mix) { td.textContent = "—"; return td; }
+    const tb = $("stattable"), yb = $("ytable"); tb.replaceChildren(); yb.replaceChildren();
+    const t = (st && st.today) || null, y = (st && st.yesterday) || null;
+    if (!t && !y) { const tr = el("tr"); const td = el("td", "notes", "No daily summary yet. It fills in at the next check."); td.colSpan = 3; tr.appendChild(td); tb.appendChild(tr); return; }
+    $("statsasof").textContent = "As of the check at " + fmtD(st.asof, true) + ". Today is NYISO's load forecast and day-ahead market; yesterday is what actually happened in real time.";
+    const g = (o, ...k) => k.reduce((x, z) => (x == null ? undefined : x[z]), o);
+    const grp = (body, txt, span) => { const tr = el("tr", "grp"); const td = el("td", "", txt); td.colSpan = span; tr.appendChild(td); body.appendChild(tr); };
+    const row2 = (label, ft, fy) => { const tr = el("tr"); tr.appendChild(el("td", "", label)); tr.appendChild(ft(t || {})); tr.appendChild(fy(y || {})); tb.appendChild(tr); };
+    const row1 = (label, f) => { const tr = el("tr"); tr.appendChild(el("td", "", label)); tr.appendChild(f(y || {})); yb.appendChild(tr); };
+    const at = (v, when) => cell(v, when ? "hour starting " + when : "");
+    grp(tb, "Demand", 3);
+    row2("Energy (GWh)", (d) => cell(g(d, "load_fc", "energy_gwh") == null ? "—" : d.load_fc.energy_gwh.toFixed(1)), (d) => cell(g(d, "load", "energy_gwh") == null ? "—" : d.load.energy_gwh.toFixed(1)));
+    row2("Peak load (MW)", (d) => at(n0(g(d, "load_fc", "peak_mw")), g(d, "load_fc", "peak_at")), (d) => at(n0(g(d, "load", "peak_mw")), g(d, "load", "peak_at")));
+    row2("Lowest load (MW)", (d) => at(n0(g(d, "load_fc", "min_mw")), g(d, "load_fc", "min_at")), (d) => at(n0(g(d, "load", "min_mw")), g(d, "load", "min_at")));
+    grp(tb, "Prices ($/MWh)", 3);
+    for (const [k, z] of [["avg_J", "J"], ["avg_K", "K"], ["avg_A", "A"]])
+      row2("Average, Zone " + z, (d) => cell(usd(g(d, "da", k))), (d) => cell(usd(g(d, "rt", k))));
+    row2("Highest hour", (d) => cell(d.da ? "$" + n0(d.da.max) : "—", d.da ? "Zone " + d.da.max_zone + ", " + d.da.max_at : ""), (d) => cell(d.rt ? "$" + n0(d.rt.max) : "—", d.rt ? "Zone " + d.rt.max_zone + ", " + d.rt.max_at : ""));
+    row2("Lowest hour", (d) => cell(d.da ? "$" + n0(d.da.min) : "—", d.da ? "Zone " + d.da.min_zone + ", " + d.da.min_at : ""), (d) => cell(d.rt ? "$" + n0(d.rt.min) : "—", d.rt ? "Zone " + d.rt.min_zone + (d.rt.min_at ? ", " + d.rt.min_at : "") : ""));
+    if (!y) return;
+    grp(yb, "Generation", 2);
+    row1("In-state generation (GWh)", (d) => cell(g(d, "gen", "energy_gwh") == null ? "—" : d.gen.energy_gwh.toFixed(1)));
+    row1("Fuel mix", (d) => { const td = el("td", "num"); const mix = g(d, "gen", "mix"); if (!mix) { td.textContent = "—"; return td; }
       const bar = el("div", "mixbar"); bar.setAttribute("role", "img");
       bar.setAttribute("aria-label", Object.entries(mix).map(([k, v]) => k + " " + pc(v)).join(", "));
       for (const [k, v] of Object.entries(mix)) { if (!v) continue; const sp = el("span"); sp.style.width = (v * 100) + "%"; sp.style.background = "var(" + (MIXC[k] || "--muted") + ")"; sp.title = k + " " + pc(v); bar.appendChild(sp); }
       td.appendChild(bar); return td; });
-    for (const k of Object.keys(MIXC)) row(k, (d) => cell(pc(g(d, "gen", "mix", k))));
-    row("Zero-carbon share", (d) => cell(pc(g(d, "gen", "zero_carbon"))));
-    grp("Net imports (average MW)");
-    for (const k of ["Hydro-Québec", "Ontario", "PJM", "New England"]) row(k, (d) => { const x = g(d, "imports", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "range " + sgn(x.min_mw) + " to " + sgn(x.max_mw) : ""); });
-    row("Total net imports", (d) => cell(sgn(d.net_import_avg_mw)));
-    for (const k of ["CHPE", "Neptune", "Cross-Sound"]) row("  " + k + " line", (d) => { const x = g(d, "lines", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "max " + sgn(x.max_mw) : ""); });
-    grp("Prices ($/MWh)");
-    row("Real-time avg, Zone J", (d) => cell(usd(g(d, "rt", "avg_J"))));
-    row("Real-time avg, Zone K", (d) => cell(usd(g(d, "rt", "avg_K"))));
-    row("Real-time avg, Zone A", (d) => cell(usd(g(d, "rt", "avg_A"))));
-    row("Day-ahead avg, Zone J", (d) => cell(usd(g(d, "da", "avg_J"))));
-    row("Day-ahead avg, Zone A", (d) => cell(usd(g(d, "da", "avg_A"))));
-    row("Highest hourly real-time", (d) => cell(d.rt ? "$" + n0(d.rt.max) : "—", d.rt ? "Zone " + d.rt.max_zone + ", " + d.rt.max_at : ""));
-    row("Lowest hourly real-time", (d) => cell(d.rt ? "$" + n0(d.rt.min) : "—", d.rt ? "Zone " + d.rt.min_zone : ""));
-    grp("Transmission");
+    for (const k of Object.keys(MIXC)) row1(k, (d) => cell(pc(g(d, "gen", "mix", k))));
+    row1("Zero-carbon share", (d) => cell(pc(g(d, "gen", "zero_carbon"))));
+    row1("Behind-the-meter solar peak", (d) => cell(d.btm_peak ? n0(d.btm_peak.mw) + " MW" : "—", d.btm_peak ? d.btm_peak.at + " · " + d.btm_peak.gwh + " GWh" : "not yet posted"));
+    grp(yb, "Net imports (average MW, + into New York)", 2);
+    for (const k of ["Hydro-Québec", "Ontario", "PJM", "New England"]) row1(k, (d) => { const x = g(d, "imports", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "range " + sgn(x.min_mw) + " to " + sgn(x.max_mw) : ""); });
+    row1("Total net imports", (d) => cell(sgn(d.net_import_avg_mw)));
+    for (const k of ["CHPE", "Neptune", "Cross-Sound"]) row1(k + " line", (d) => { const x = g(d, "lines", k); return cell(x ? sgn(x.avg_mw) : "—", x ? "max " + sgn(x.max_mw) : ""); });
+    grp(yb, "Transmission", 2);
     for (const [k, lab] of [["CENTRAL EAST - VC", "Central East peak"], ["TOTAL EAST", "Total East peak"], ["UPNY CONED", "UPNY–ConEd peak"]])
-      row(lab, (d) => { const x = g(d, "transfers", k); return cell(x ? n0(x.max_mw) + " MW" : "—", x && x.max_pct_limit != null ? Math.round(x.max_pct_limit * 100) + "% of limit" : ""); });
-    row("Most-binding constraint", (d) => { const c = (d.constraints || [])[0]; return cell(c ? c.name.replace(/\s+\d+$/, "").replace(/\s+/g, " ") : "—", c ? c.intervals + " five-min intervals · peak $" + n0(c.peak) : ""); });
+      row1(lab, (d) => { const x = g(d, "transfers", k); return cell(x ? n0(x.max_mw) + " MW" : "—", x && x.max_pct_limit != null ? Math.round(x.max_pct_limit * 100) + "% of limit" : ""); });
+    row1("Most-binding constraint", (d) => { const c = (d.constraints || [])[0]; return cell(c ? c.name.replace(/\s+\d+$/, "").replace(/\s+/g, " ") : "—", c ? c.intervals + " five-min intervals · peak $" + n0(c.peak) : ""); });
+    grp(yb, "Day-ahead vs. real-time (yesterday)", 2);
+    row1("Day-ahead avg, Zone J", (d) => cell(usd(g(d, "da", "avg_J")), d.rt && d.da && d.da.avg_J != null ? "real-time " + usd(d.rt.avg_J) : ""));
+    row1("Day-ahead avg, Zone A", (d) => cell(usd(g(d, "da", "avg_A")), d.rt && d.da && d.da.avg_A != null ? "real-time " + usd(d.rt.avg_A) : ""));
     const lg = $("mixlegend"); lg.replaceChildren();
-    for (const [k, v] of Object.entries(MIXC)) { const s = el("span"); const i = el("i"); i.style.background = "var(" + v + ")"; s.appendChild(i); s.appendChild(document.createTextNode(k)); lg.appendChild(s); }
+    for (const [k, v] of Object.entries(MIXC)) { const sp = el("span"); const i = el("i"); i.style.background = "var(" + v + ")"; sp.appendChild(i); sp.appendChild(document.createTextNode(k)); lg.appendChild(sp); }
   }
+
 
 
   async function setupDownload(db) {

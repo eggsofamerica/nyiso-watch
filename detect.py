@@ -155,7 +155,7 @@ def day_stats(D, label, end):
             g = rh.groupby("zone").v
             out["rt"] = {"avg_J": r1(g.mean().get("N.Y.C."), 2), "avg_A": r1(g.mean().get("WEST"), 2), "avg_K": r1(g.mean().get("LONGIL"), 2),
                          "max": r1(pk.v), "max_zone": ZN[pk.zone].split()[0], "max_at": f"{pk.h:%-I%p}",
-                         "min": r1(rh.v.min()), "min_zone": ZN[rh.loc[rh.v.idxmin()].zone].split()[0]}
+                         "min": r1(rh.v.min()), "min_zone": ZN[rh.loc[rh.v.idxmin()].zone].split()[0], "min_at": f"{rh.loc[rh.v.idxmin()].h:%-I%p}"}
     A = day("da", D)
     if A is not None and len(A):
         g = A[A.zone.isin(ZN)].groupby("zone").lbmp.mean()
@@ -171,6 +171,26 @@ def day_stats(D, label, end):
         if b is not None and len(b):
             s = b[b.zone == "SYSTEM"]
             if len(s): pk = s.loc[s.v.idxmax()]; out["btm_peak"] = {"mw": r1(pk.v), "at": f"{pk.ts:%-I%p}", "gwh": r1(s.v.sum() / 1000, 1)}
+    return out
+
+def today_ahead(D):
+    r1 = lambda v, n=0: None if v is None or pd.isna(v) else round(float(v), n)
+    out = {"date": str(D)}
+    fc = day("isolf", D)
+    if fc is not None and len(fc):
+        f = fc[fc.ts.dt.date == D]
+        if len(f):
+            pk = f.loc[f.v.idxmax()]; mn = f.loc[f.v.idxmin()]
+            out["load_fc"] = {"energy_gwh": r1(f.v.sum() / 1000, 1), "peak_mw": r1(pk.v), "peak_at": f"{pk.ts:%-I%p}",
+                              "min_mw": r1(mn.v), "min_at": f"{mn.ts:%-I%p}"}
+    A = day("da", D)
+    if A is not None and len(A):
+        A = A[A.zone.isin(ZN)]
+        if len(A):
+            g = A.groupby("zone").lbmp.mean(); pk = A.loc[A.lbmp.idxmax()]; mn = A.loc[A.lbmp.idxmin()]
+            out["da"] = {"avg_J": r1(g.get("N.Y.C."), 2), "avg_K": r1(g.get("LONGIL"), 2), "avg_A": r1(g.get("WEST"), 2),
+                         "max": r1(pk.lbmp), "max_zone": ZN[pk.zone].split()[0], "max_at": f"{pk.ts:%-I%p}",
+                         "min": r1(mn.lbmp), "min_zone": ZN[mn.zone].split()[0], "min_at": f"{mn.ts:%-I%p}"}
     return out
 
 def main(sp, cp, op, now):
@@ -326,8 +346,8 @@ def main(sp, cp, op, now):
                     if len(ws):
                         p2 = ws.loc[ws.t.idxmax()]; record("ws_h", p2.t, p2.h, lambda a, b: a > b, "wind + solar incl. behind-the-meter", mw, 0)
             st["daily_done"] = str(yday)
-    tom = (now + pd.Timedelta(days=1)).date()
-    if st.get("da_done") != str(tom):
+    for tom in (now.date(), (now + pd.Timedelta(days=1)).date()):
+        if st.get("da_done") and st["da_done"] >= str(tom): continue
         da = day("da", tom)
         if da is not None and len(da) >= 200:
             st["da_done"] = str(tom)
@@ -340,12 +360,13 @@ def main(sp, cp, op, now):
                 def hit(df, z=z, v=v):
                     g = df[df.zone == z].assign(d=lambda x: x.ts.dt.date).groupby("d").lbmp.mean(); return pd.to_datetime(pd.Series(g[g >= v].index))
                 t0 = since("da", pd.Timestamp(tom), hit)
-                alert("da_high", 0, "price", f"Tomorrow's day-ahead prices: Zone {ZN[z].split()[0]} ${v:,.0f}/MWh avg",
+                alert("da_high", 0, "price", f"Day-ahead prices {'today' if tom == now.date() else 'tomorrow'}: Zone {ZN[z].split()[0]} ${v:,.0f}/MWh avg",
                       f"Day-ahead prices for {tom:%a %b %-d} average ${v:,.0f}/MWh in Zone {ZN[z]}. {len(hi)} zone(s) are above their 99th percentile of the past three years. Highest day-ahead daily average in that zone since {ago(t0, now)}.", pd.Timestamp(tom))
     # ---- load forecast heads-up (NYISO's forecast for the next several days)
-    fc = day("isolf", now.date())
-    if fc is not None and len(fc):
-        fc = fc[fc.ts.dt.date > now.date()]
+    fcs = [f for f in (day("isolf", now.date()), day("isolf", now.date() + dt.timedelta(1))) if f is not None and len(f)]
+    if fcs:
+        fc = pd.concat(fcs).drop_duplicates("ts", keep="last")
+        fc = fc[fc.ts.dt.date >= now.date()]
         pkd = fc.groupby(fc.ts.dt.date).v.max()
         thr = lambda D: 23000 if D.month in (11, 12, 1, 2, 3) else 29000 if D.month in (5, 6, 7, 8, 9) else None
         hot = {D: v for D, v in pkd.items() if thr(D) and v > thr(D)}
@@ -360,7 +381,7 @@ def main(sp, cp, op, now):
                 win = D.month in (11, 12, 1, 2, 3); rk = "nyca_winter_load_h" if win else "nyca_load_h"
                 near = v >= 0.98 * R[rk][0]
                 alert("fcst_load", 0, "load", f"Forecast: NYCA load {mw(v)} on {D:%a %b %-d}",
-                      f"NYISO's load forecast shows statewide demand peaking near {mw(v)} on {D:%a %b %-d}, {(D - now.date()).days} day(s) out. If it holds, that would be the highest actual load since {ago(t0, now)}. The {'winter' if win else 'all-time'} record is {mw(R[rk][0])} ({pd.Timestamp(R[rk][1]):%b %Y}). Forecasts several days out can shift.",
+                      f"NYISO's load forecast shows statewide demand peaking near {mw(v)} on {D:%a %b %-d} ({'today' if D == now.date() else str((D - now.date()).days) + ' day(s) out'}). If it holds, that would be the highest actual load since {ago(t0, now)}. The {'winter' if win else 'all-time'} record is {mw(R[rk][0])} ({pd.Timestamp(R[rk][1]):%b %Y}). Forecasts several days out can shift.",
                       pd.Timestamp(D), "major" if near else "notable")
     # ---- summary for judgment
     summ = {}
@@ -373,9 +394,9 @@ def main(sp, cp, op, now):
     json.dump(st, open(sp, "w"), separators=(",", ":"))
     try:
         today = now.date()
-        daily = {"asof": now.isoformat(timespec="minutes"), "days": [day_stats(today, "Today so far", end), day_stats(today - dt.timedelta(1), "Yesterday", end)]}
+        daily = {"asof": now.isoformat(timespec="minutes"), "today": today_ahead(today), "yesterday": day_stats(today - dt.timedelta(1), "Yesterday", end)}
     except Exception as ex:
-        daily = {"asof": now.isoformat(timespec="minutes"), "error": str(ex)[:200], "days": []}
+        daily = {"asof": now.isoformat(timespec="minutes"), "error": str(ex)[:200]}
     json.dump({"window": [str(cur), str(end)], "alerts": alerts, "watch": watch[:8], "summary": summ, "daily": daily}, open(op, "w"), indent=1)
     print(json.dumps({"alerts": len(alerts), "watch": len(watch), "window": [str(cur), str(end)]}))
 
