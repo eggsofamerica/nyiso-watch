@@ -4,7 +4,7 @@ Monitors NYISO's public data (mis.nyiso.com) and logs rare, notable grid events 
 
 ## How it runs
 
-A Claude scheduled task runs three times a day (8:44am, 1:44pm, 6:44pm New York time). Each run clones this repository, runs `detect.py`, and writes alerts, the daily summary, and the detector's state to the dashboard's storage.
+A Claude scheduled task runs once a day at 8:10am New York time. Each run clones this repository, runs `detect.py`, and writes alerts, the daily summary, and the detector's state to the dashboard's storage.
 
 ```
 python3 detect.py state.json calib.json out.json [--now 'YYYY-MM-DD HH:MM']
